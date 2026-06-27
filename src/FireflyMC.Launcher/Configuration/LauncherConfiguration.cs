@@ -96,6 +96,7 @@ public sealed class UpdateOptions
     public int PerFileTimeoutSeconds { get; init; } = 60;
     public int ResolveFailureThresholdPercent { get; init; } = 10;
     public int McimStaleThresholdDays { get; init; } = 7;
+    public int MaxConcurrentDownloads { get; init; } = 8;
 }
 
 public sealed class FireflyApiOptions

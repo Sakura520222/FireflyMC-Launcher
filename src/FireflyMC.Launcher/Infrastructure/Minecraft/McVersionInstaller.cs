@@ -8,7 +8,7 @@ using FireflyMC.Launcher.Models;
 
 namespace FireflyMC.Launcher.Infrastructure.Minecraft;
 
-public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths paths, IDownloader downloader, LauncherConfiguration configuration, IDiagnosticLogger logger)
+public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths paths, IDownloader downloader, LauncherConfiguration configuration, IDiagnosticLogger logger, ConcurrentDownloader concurrentDownloader)
 {
     public async Task InstallAsync(string version, IProgress<StageProgress>? progress, CancellationToken cancellationToken)
     {
@@ -69,7 +69,8 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             return;
         }
 
-        var nativeJars = new List<string>();
+        var libJobs = new List<ConcurrentDownloadJob>();
+        var nativePaths = new List<string>();
         foreach (var library in libraries.EnumerateArray())
         {
             if (!AllowsCurrentOs(library))
@@ -77,42 +78,68 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
                 continue;
             }
 
-            if (library.TryGetProperty("downloads", out var downloads)
-                && downloads.TryGetProperty("artifact", out var artifact))
+            if (!library.TryGetProperty("downloads", out var downloads))
             {
-                await DownloadLibraryArtifactAsync(artifact, progress, cancellationToken);
+                continue;
+            }
+
+            if (downloads.TryGetProperty("artifact", out var artifact)
+                && TryBuildLibraryJob(artifact) is { } artifactJob)
+            {
+                libJobs.Add(artifactJob);
             }
 
             if (TryGetWindowsNativeClassifier(library) is { } classifier
                 && downloads.TryGetProperty("classifiers", out var classifiers)
-                && classifiers.TryGetProperty(classifier, out var native))
+                && classifiers.TryGetProperty(classifier, out var native)
+                && TryBuildLibraryJob(native) is { } nativeJob)
             {
-                var path = await DownloadLibraryArtifactAsync(native, progress, cancellationToken);
-                nativeJars.Add(path);
+                libJobs.Add(nativeJob);
+                nativePaths.Add(nativeJob.DestinationPath);
             }
         }
 
-        logger.LogDebug($"下载 {nativeJars.Count} 个 native 库");
+        if (libJobs.Count > 0)
+        {
+            logger.LogInformation($"并发下载 {libJobs.Count} 个库文件（含 {nativePaths.Count} 个 native）");
+            await concurrentDownloader.DownloadAllAsync(
+                libJobs,
+                configuration.Update.MaxConcurrentDownloads,
+                OperationStage.Minecraft,
+                overallBase: null,
+                overallSpan: null,
+                progress,
+                cancellationToken);
+        }
+
+        logger.LogDebug($"解压 {nativePaths.Count} 个 native 库");
         var nativesDir = Path.Combine(paths.VersionsDirectory, "natives");
         Directory.CreateDirectory(nativesDir);
-        foreach (var nativeJar in nativeJars)
+        foreach (var nativeJar in nativePaths)
         {
-            ExtractNatives(nativeJar, nativesDir);
-        }
-    }
-
-    private async Task<string> DownloadLibraryArtifactAsync(JsonElement artifact, IProgress<StageProgress>? progress, CancellationToken cancellationToken)
-    {
-        var relative = TryGetString(artifact, "path") ?? throw new InvalidOperationException("Library artifact is missing path.");
-        var url = TryGetString(artifact, "url") ?? throw new InvalidOperationException("Library artifact is missing URL.");
-        var target = Path.Combine(paths.LibrariesDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(target))
-        {
-            progress?.Report(new StageProgress(OperationStage.Minecraft, null, null, relative, 0, null, null, null, true));
-            await downloader.DownloadAsync(new Uri(url), target, resume: true, progress, cancellationToken);
+            if (File.Exists(nativeJar))
+            {
+                ExtractNatives(nativeJar, nativesDir);
+            }
         }
 
-        return target;
+        ConcurrentDownloadJob? TryBuildLibraryJob(JsonElement artifact)
+        {
+            var relative = TryGetString(artifact, "path");
+            var url = TryGetString(artifact, "url");
+            if (relative is null || url is null)
+            {
+                return null;
+            }
+
+            var target = Path.Combine(paths.LibrariesDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(target))
+            {
+                return null;
+            }
+
+            return new ConcurrentDownloadJob(new Uri(url), target, target, Required: true, ExpectedSha1: null, RecordActualSha1: false);
+        }
     }
 
     private async Task DownloadAssetsAsync(JsonElement root, IProgress<StageProgress>? progress, CancellationToken cancellationToken)
@@ -139,7 +166,7 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             return;
         }
 
-        var assetCount = 0;
+        var assetJobs = new List<ConcurrentDownloadJob>();
         foreach (var property in objects.EnumerateObject())
         {
             if (!property.Value.TryGetProperty("hash", out var hashElement) || hashElement.GetString() is not { } hash)
@@ -155,14 +182,20 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             }
 
             var url = $"https://resources.download.minecraft.net/{prefix}/{hash}";
-            progress?.Report(new StageProgress(OperationStage.Minecraft, null, null, property.Name, 0, null, null, null, true));
-            await downloader.DownloadAsync(new Uri(url), target, resume: true, progress, cancellationToken);
-            assetCount++;
+            assetJobs.Add(new ConcurrentDownloadJob(new Uri(url), target, hash, Required: true, ExpectedSha1: null, RecordActualSha1: false));
         }
 
-        if (assetCount > 0)
+        if (assetJobs.Count > 0)
         {
-            logger.LogDebug($"下载 {assetCount} 个资源文件");
+            logger.LogInformation($"并发下载 {assetJobs.Count} 个资源文件");
+            await concurrentDownloader.DownloadAllAsync(
+                assetJobs,
+                configuration.Update.MaxConcurrentDownloads,
+                OperationStage.Minecraft,
+                overallBase: null,
+                overallSpan: null,
+                progress,
+                cancellationToken);
         }
     }
 

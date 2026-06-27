@@ -96,6 +96,7 @@ public partial class App : Application
         services.AddSingleton<IInstalledManifestStore, JsonInstalledManifestStore>();
         services.AddSingleton<IHashVerifier, HashVerifier>();
         services.AddSingleton<IDownloader, HttpDownloader>();
+        services.AddSingleton<ConcurrentDownloader>();
         services.AddSingleton<MirrorRouter>();
         services.AddSingleton<ModrinthClient>();
         services.AddSingleton<CurseForgeClient>();

@@ -24,7 +24,8 @@ public sealed class ModPackUpdateService(
     ModPlatformResolver platformResolver,
     IUpdateTransaction updateTransaction,
     LauncherUserAgent userAgent,
-    IDiagnosticLogger logger) : IModPackUpdateService
+    IDiagnosticLogger logger,
+    ConcurrentDownloader concurrentDownloader) : IModPackUpdateService
 {
     public Task RecoverAsync(CancellationToken cancellationToken)
     {
@@ -167,12 +168,11 @@ public sealed class ModPackUpdateService(
         var stagedRelativePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var stagedSha1 = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var totalDownloads = plan.Downloads.Count + (plan.FireflyModAction.ShouldDownload ? 1 : 0);
-        var index = 0;
 
+        // 过滤 about:blank（解析占位），构造并发下载 job；Firefly mod 单独下载不参与并发。
+        var modJobs = new List<ConcurrentDownloadJob>();
         foreach (var download in plan.Downloads)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            index++;
             if (download.Source.DownloadUri.Scheme == "about")
             {
                 if (download.Required)
@@ -181,35 +181,43 @@ public sealed class ModPackUpdateService(
                     throw new InvalidOperationException($"Required mod could not be resolved: {download.Source.Entry.Name}");
                 }
 
+                logger.LogDebug($"跳过未解析的可选 mod: {download.Source.Entry.Name}");
                 continue;
             }
 
-            var staged = GetStagedPath(download.RelativePath);
-            progress?.Report(new StageProgress(OperationStage.Stage, null, 7 + (index * 70d / Math.Max(1, totalDownloads)), download.RelativePath, 0, download.Source.Size, null, null, true));
-            await downloader.DownloadAsync(download.Source.DownloadUri, staged, resume: true, progress, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(download.Source.Sha1)
-                && !await hashVerifier.VerifySha1Async(staged, download.Source.Sha1, cancellationToken))
+            modJobs.Add(new ConcurrentDownloadJob(
+                download.Source.DownloadUri,
+                GetStagedPath(download.RelativePath),
+                download.RelativePath,
+                download.Required,
+                string.IsNullOrWhiteSpace(download.Source.Sha1) ? null : download.Source.Sha1,
+                RecordActualSha1: true));
+        }
+
+        if (modJobs.Count > 0)
+        {
+            logger.LogInformation($"并发下载 {modJobs.Count} 个 mod（上限 {configuration.Update.MaxConcurrentDownloads}）");
+            var modResult = await concurrentDownloader.DownloadAllAsync(
+                modJobs,
+                configuration.Update.MaxConcurrentDownloads,
+                OperationStage.Stage,
+                overallBase: 7,
+                overallSpan: 70,
+                progress,
+                cancellationToken);
+            foreach (var (relativePath, file) in modResult.Files)
             {
-                if (download.Required)
-                {
-                    logger.LogError($"必需文件 SHA-1 校验失败: {download.RelativePath}");
-                    throw new InvalidDataException($"SHA-1 mismatch for required file {download.RelativePath}.");
-                }
-
-                logger.LogWarning($"可选文件 SHA-1 校验失败，跳过: {download.RelativePath}");
-                continue;
+                stagedRelativePaths[relativePath] = file.Path;
+                stagedSha1[relativePath] = file.ActualSha1 ?? await hashVerifier.ComputeSha1Async(file.Path, cancellationToken);
             }
-
-            stagedRelativePaths[download.RelativePath] = staged;
-            stagedSha1[download.RelativePath] = await hashVerifier.ComputeSha1Async(staged, cancellationToken);
         }
 
         var augmentedDownloads = plan.Downloads.Where(d => stagedRelativePaths.ContainsKey(d.RelativePath)).ToList();
         if (plan.FireflyModAction is { ShouldDownload: true, DownloadUri: not null } firefly)
         {
-            index++;
+            var fireflyIndex = modJobs.Count + 1;
             var staged = GetStagedPath(firefly.RelativePath);
-            progress?.Report(new StageProgress(OperationStage.Stage, null, 7 + (index * 70d / Math.Max(1, totalDownloads)), firefly.RelativePath, 0, null, null, null, true));
+            progress?.Report(new StageProgress(OperationStage.Stage, null, 7 + (fireflyIndex * 70d / Math.Max(1, totalDownloads)), firefly.RelativePath, 0, null, null, null, true));
             await downloader.DownloadAsync(firefly.DownloadUri, staged, resume: true, progress, cancellationToken);
             if (!string.IsNullOrWhiteSpace(firefly.Sha256)
                 && !await hashVerifier.VerifySha256Async(staged, firefly.Sha256, cancellationToken))

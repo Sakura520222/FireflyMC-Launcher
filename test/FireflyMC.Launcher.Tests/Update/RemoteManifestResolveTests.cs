@@ -56,7 +56,8 @@ public sealed class RemoteManifestResolveTests
             platformResolver: null!,
             updateTransaction: null!,
             LauncherUserAgent.Create(configuration),
-            new NullDiagnosticLogger());
+            new NullDiagnosticLogger(),
+            concurrentDownloader: null!);
 
         var manifest = await service.ResolveRemoteManifestAsync(CancellationToken.None);
 
