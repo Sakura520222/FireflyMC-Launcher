@@ -7,9 +7,7 @@ using FireflyMC.Launcher.Models;
 
 namespace FireflyMC.Launcher.Infrastructure.Download;
 
-/// <summary>
 /// 单个并发下载任务。Label 用作进度展示与结果索引（mod=相对路径，assets=hash/文件名）。
-/// </summary>
 public sealed record ConcurrentDownloadJob(
     Uri Uri,
     string DestinationPath,
@@ -24,10 +22,8 @@ public sealed record ConcurrentDownloadResult(
     IReadOnlyDictionary<string, DownloadedFile> Files,
     int SkippedCount);
 
-/// <summary>
 /// 文件间并发下载器。用 <see cref="SemaphoreSlim"/> 限流，复用 <see cref="IDownloader"/> 的单文件续传/重试；
 /// 字节级进度聚合，required 失败 fast-fail（取消在途任务），可选失败跳过。单文件分段不在范围。
-/// </summary>
 public sealed class ConcurrentDownloader
 {
     private readonly IDownloader _downloader;
@@ -141,7 +137,7 @@ public sealed class ConcurrentDownloader
         return new ConcurrentDownloadResult(succeeded.ToDictionary(), skipped.Value);
     }
 
-    /// <summary>轻量 <see cref="IProgress{T}"/>，直接在回调线程触发（不用 <c>Progress&lt;T&gt;</c> 的 SynchronizationContext）。 </summary>
+    /// 轻量 <see cref="IProgress{T}"/>，直接在回调线程触发（不用 <c>Progress&lt;T&gt;</c> 的 SynchronizationContext）。
     private sealed class ActionProgress<T> : IProgress<T>
     {
         private readonly Action<T> _action;
@@ -149,7 +145,7 @@ public sealed class ConcurrentDownloader
         public void Report(T value) => _action(value);
     }
 
-    /// <summary>单次 <see cref="DownloadAllAsync"/> 调用的字节级进度聚合器（per-call，无实例共享状态）。 </summary>
+    /// 单次 <see cref="DownloadAllAsync"/> 调用的字节级进度聚合器（per-call，无实例共享状态）。
     private sealed class ProgressAggregator
     {
         private readonly IProgress<StageProgress>? _progress;

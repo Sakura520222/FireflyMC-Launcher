@@ -127,9 +127,7 @@ public sealed class ConcurrentDownloaderTests
         return root;
     }
 
-    /// <summary>
     /// 可控的 <see cref="IDownloader"/>：记录观察到的最大并发数，按 Uri 注入失败，可选延迟。
-    /// </summary>
     private sealed class FakeDownloader : IDownloader
     {
         private readonly Dictionary<Uri, Exception> _failures;
