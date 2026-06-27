@@ -34,10 +34,12 @@ public sealed class LaunchService(
         var versionJson = FindVersionJson();
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(versionJson, cancellationToken));
         var root = document.RootElement;
-        var versionId = TryGetString(root, "id") ?? configuration.Game.MinecraftVersion;
-        var mainClass = TryGetString(root, "mainClass") ?? "net.minecraft.client.main.Main";
-        var assetIndex = TryGetString(root.GetProperty("assetIndex"), "id") ?? configuration.Game.MinecraftVersion;
-        var classpath = BuildClasspath(versionJson, root);
+        using var inheritedDocument = await LoadInheritedVersionDocumentAsync(root, cancellationToken);
+        var inheritedRoot = inheritedDocument?.RootElement;
+        var versionId = TryGetString(root, "id") ?? TryGetString(inheritedRoot, "id") ?? configuration.Game.MinecraftVersion;
+        var mainClass = TryGetString(root, "mainClass") ?? TryGetString(inheritedRoot, "mainClass") ?? "net.minecraft.client.main.Main";
+        var assetIndex = TryGetAssetIndex(root) ?? TryGetAssetIndex(inheritedRoot) ?? configuration.Game.MinecraftVersion;
+        var classpath = BuildClasspath((GetInheritedVersionJson(root), inheritedRoot), (versionJson, root));
         var java = string.IsNullOrWhiteSpace(settings.JavaPathOverride)
             ? javaRuntimeInstaller.JavaExecutable
             : settings.JavaPathOverride!;
@@ -47,6 +49,8 @@ public sealed class LaunchService(
             throw new FileNotFoundException("Java executable not found.", java);
         }
 
+        var token = account.Type == AccountType.Offline ? "0" : session!.MinecraftAccessToken!;
+        var variables = CreateArgumentVariables(account, versionId, assetIndex, token, classpath);
         var jvmArgs = new List<string>
         {
             $"-Xms{settings.MinMemoryMb}m",
@@ -60,7 +64,11 @@ public sealed class LaunchService(
             jvmArgs.AddRange(SplitArguments(settings.AdditionalJvmArgs));
         }
 
-        var token = account.Type == AccountType.Offline ? "0" : session!.MinecraftAccessToken!;
+        if (inheritedRoot is not null)
+        {
+            AddVersionArguments(root, "jvm", jvmArgs, variables);
+        }
+
         var gameArgs = new List<string>
         {
             "--username", account.Username,
@@ -73,6 +81,11 @@ public sealed class LaunchService(
             "--userType", account.Type == AccountType.Microsoft ? "msa" : "legacy",
             "--versionType", "FireflyMC"
         };
+        if (inheritedRoot is not null)
+        {
+            AddVersionArguments(root, "game", gameArgs, variables);
+        }
+
         if (settings.AutoJoinServer)
         {
             gameArgs.Add("--server");
@@ -128,11 +141,45 @@ public sealed class LaunchService(
         throw new FileNotFoundException("未找到 Minecraft version.json，请先安装游戏。", vanilla);
     }
 
-    private IReadOnlyList<string> BuildClasspath(string versionJson, JsonElement root)
+    private async Task<JsonDocument?> LoadInheritedVersionDocumentAsync(JsonElement root, CancellationToken cancellationToken)
+    {
+        var inheritedVersionJson = GetInheritedVersionJson(root);
+        if (inheritedVersionJson is null)
+        {
+            return null;
+        }
+
+        return JsonDocument.Parse(await File.ReadAllTextAsync(inheritedVersionJson, cancellationToken));
+    }
+
+    private string? GetInheritedVersionJson(JsonElement root)
+    {
+        var inheritedVersion = TryGetString(root, "inheritsFrom");
+        if (string.IsNullOrWhiteSpace(inheritedVersion))
+        {
+            return null;
+        }
+
+        var inheritedVersionJson = Path.Combine(paths.VersionsDirectory, inheritedVersion, $"{inheritedVersion}.json");
+        if (File.Exists(inheritedVersionJson))
+        {
+            return inheritedVersionJson;
+        }
+
+        logger.LogError($"未找到继承的 version.json: {inheritedVersion}");
+        throw new FileNotFoundException("未找到继承的 Minecraft version.json，请重新安装游戏。", inheritedVersionJson);
+    }
+
+    private IReadOnlyList<string> BuildClasspath(params (string? VersionJson, JsonElement? Root)[] versions)
     {
         var classpath = new List<string>();
-        if (root.TryGetProperty("libraries", out var libraries))
+        foreach (var (_, root) in versions)
         {
+            if (root is not { } versionRoot || !versionRoot.TryGetProperty("libraries", out var libraries))
+            {
+                continue;
+            }
+
             foreach (var library in libraries.EnumerateArray())
             {
                 if (library.TryGetProperty("downloads", out var downloads)
@@ -140,7 +187,7 @@ public sealed class LaunchService(
                     && TryGetString(artifact, "path") is { } relative)
                 {
                     var path = Path.Combine(paths.LibrariesDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(path))
+                    if (File.Exists(path) && !classpath.Contains(path))
                     {
                         classpath.Add(path);
                     }
@@ -148,13 +195,126 @@ public sealed class LaunchService(
             }
         }
 
-        var jar = Path.ChangeExtension(versionJson, ".jar");
-        if (File.Exists(jar))
+        foreach (var (versionJson, _) in versions)
         {
-            classpath.Add(jar);
+            if (versionJson is null)
+            {
+                continue;
+            }
+
+            var jar = Path.ChangeExtension(versionJson, ".jar");
+            if (File.Exists(jar) && !classpath.Contains(jar))
+            {
+                classpath.Add(jar);
+            }
         }
 
         return classpath;
+    }
+
+    private Dictionary<string, string> CreateArgumentVariables(
+        AccountProfile account,
+        string versionId,
+        string assetIndex,
+        string token,
+        IReadOnlyList<string> classpath)
+    {
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["auth_player_name"] = account.Username,
+            ["version_name"] = versionId,
+            ["game_directory"] = paths.MinecraftDirectory,
+            ["assets_root"] = paths.AssetsDirectory,
+            ["assets_index_name"] = assetIndex,
+            ["auth_uuid"] = account.Uuid,
+            ["auth_access_token"] = token,
+            ["user_type"] = account.Type == AccountType.Microsoft ? "msa" : "legacy",
+            ["version_type"] = "FireflyMC",
+            ["natives_directory"] = Path.Combine(paths.VersionsDirectory, "natives"),
+            ["launcher_name"] = "FireflyMC-Launcher",
+            ["launcher_version"] = "1.0.0",
+            ["library_directory"] = paths.LibrariesDirectory,
+            ["classpath_separator"] = Path.PathSeparator.ToString(),
+            ["classpath"] = string.Join(Path.PathSeparator, classpath)
+        };
+    }
+
+    private static void AddVersionArguments(
+        JsonElement root,
+        string section,
+        List<string> arguments,
+        IReadOnlyDictionary<string, string> variables)
+    {
+        if (!root.TryGetProperty("arguments", out var versionArguments)
+            || !versionArguments.TryGetProperty(section, out var sectionArguments)
+            || sectionArguments.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var argument in sectionArguments.EnumerateArray())
+        {
+            AddArgumentValue(argument, arguments, variables);
+        }
+    }
+
+    private static void AddArgumentValue(
+        JsonElement argument,
+        List<string> arguments,
+        IReadOnlyDictionary<string, string> variables)
+    {
+        if (argument.ValueKind == JsonValueKind.String)
+        {
+            arguments.Add(ApplyVariables(argument.GetString()!, variables));
+            return;
+        }
+
+        if (argument.ValueKind != JsonValueKind.Object
+            || !argument.TryGetProperty("value", out var value))
+        {
+            return;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            arguments.Add(ApplyVariables(value.GetString()!, variables));
+            return;
+        }
+
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                arguments.Add(ApplyVariables(item.GetString()!, variables));
+            }
+        }
+    }
+
+    private static string ApplyVariables(string argument, IReadOnlyDictionary<string, string> variables)
+    {
+        foreach (var (key, value) in variables)
+        {
+            argument = argument.Replace($"${{{key}}}", value, StringComparison.Ordinal);
+        }
+
+        return argument;
+    }
+
+    private static string? TryGetAssetIndex(JsonElement? root)
+    {
+        if (root is not { } versionRoot)
+        {
+            return null;
+        }
+
+        return versionRoot.TryGetProperty("assetIndex", out var assetIndex)
+            ? TryGetString(assetIndex, "id")
+            : TryGetString(versionRoot, "assets");
     }
 
     private static IEnumerable<string> SplitArguments(string arguments)
@@ -162,10 +322,10 @@ public sealed class LaunchService(
         return arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    private static string? TryGetString(JsonElement element, string property)
+    private static string? TryGetString(JsonElement? element, string property)
     {
-        return element.ValueKind == JsonValueKind.Object
-            && element.TryGetProperty(property, out var value)
+        return element is { ValueKind: JsonValueKind.Object }
+            && element.Value.TryGetProperty(property, out var value)
             && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
