@@ -1,0 +1,9 @@
+{
+  "vendor": "eclipse",
+  "major": 21,
+  "runtimeVersion": "21.0.8+9",
+  "architecture": "x64",
+  "imageType": "jre",
+  "sha256": "",
+  "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/OpenJDK21U-jre_x64_windows_hotspot_21.0.8_9.zip"
+}
