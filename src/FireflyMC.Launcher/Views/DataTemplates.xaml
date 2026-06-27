@@ -1,0 +1,22 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:pages="clr-namespace:FireflyMC.Launcher.Views.Pages"
+    xmlns:vm="clr-namespace:FireflyMC.Launcher.ViewModels">
+
+    <DataTemplate DataType="{x:Type vm:HomeViewModel}">
+        <pages:HomeView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:AccountViewModel}">
+        <pages:AccountView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:DownloadViewModel}">
+        <pages:DownloadView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+        <pages:SettingsView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:AboutViewModel}">
+        <pages:AboutView />
+    </DataTemplate>
+</ResourceDictionary>

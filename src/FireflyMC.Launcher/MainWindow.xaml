@@ -1,0 +1,65 @@
+<Window x:Class="FireflyMC.Launcher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="FireflyMC Launcher"
+        Height="720"
+        Width="1120"
+        MinHeight="620"
+        MinWidth="960">
+    <Grid Background="#F5F7FA">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Background="#1F2937">
+            <DockPanel LastChildFill="True">
+                <TextBlock DockPanel.Dock="Top"
+                           Text="FireflyMC"
+                           Foreground="White"
+                           FontSize="24"
+                           FontWeight="SemiBold"
+                           Margin="20,24,20,18" />
+                <ItemsControl ItemsSource="{Binding NavigationItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                    HorizontalContentAlignment="Left"
+                                    MinWidth="0"
+                                    Margin="12,4"
+                                    Background="#374151"
+                                    Foreground="White"
+                                    BorderThickness="0">
+                                <TextBlock Text="{Binding Title}" />
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="48" />
+            </Grid.RowDefinitions>
+            <ContentControl Grid.Row="0"
+                            Margin="28"
+                            Content="{Binding CurrentPage}" />
+            <Border Grid.Row="1" Background="White" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0">
+                <DockPanel Margin="16,0">
+                    <TextBlock VerticalAlignment="Center"
+                               Text="{Binding OperationText}"
+                               Foreground="#374151" />
+                    <Button DockPanel.Dock="Right"
+                            Content="取消"
+                            Command="{Binding CancelCommand}"
+                            IsEnabled="{Binding CanCancel}" />
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

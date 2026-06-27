@@ -1,0 +1,39 @@
+<UserControl x:Class="FireflyMC.Launcher.Views.Pages.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" Foreground="#111827" />
+            <GroupBox Header="性能" Margin="0,24,0,12">
+                <StackPanel>
+                    <CheckBox Content="自动内存" IsChecked="{Binding AutomaticMemory}" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="最小内存 MB" VerticalAlignment="Center" Width="120" />
+                        <TextBox Width="100" Text="{Binding MinMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="最大内存 MB" VerticalAlignment="Center" Width="120" Margin="20,0,0,0" />
+                        <TextBox Width="100" Text="{Binding MaxMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <TextBox Text="{Binding AdditionalJvmArgs, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+            </GroupBox>
+            <GroupBox Header="Java / 网络 / 游戏">
+                <StackPanel>
+                    <TextBox Text="{Binding JavaPathOverride, UpdateSourceTrigger=PropertyChanged}" />
+                    <CheckBox Content="使用镜像" IsChecked="{Binding UseMirror}" />
+                    <CheckBox Content="启动后自动连服" IsChecked="{Binding AutoJoinServer}" />
+                    <CheckBox Content="自动检查更新" IsChecked="{Binding AutoCheckUpdates}" />
+                </StackPanel>
+            </GroupBox>
+            <GroupBox Header="日志">
+                <StackPanel>
+                    <CheckBox Content="记录网络诊断信息" IsChecked="{Binding RecordNetworkDiagnostics}" />
+                    <CheckBox Content="显示用户名/UUID" IsChecked="{Binding ShowUsernameAndUuidInLogs}" />
+                </StackPanel>
+            </GroupBox>
+            <StackPanel Orientation="Horizontal">
+                <Button Content="保存" Command="{Binding SaveCommand}" />
+                <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Margin="12,0,0,0" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

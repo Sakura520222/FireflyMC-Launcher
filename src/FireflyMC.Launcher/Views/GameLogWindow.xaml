@@ -1,0 +1,12 @@
+<Window x:Class="FireflyMC.Launcher.Views.GameLogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="游戏日志"
+        Height="520"
+        Width="860">
+    <Grid Margin="12">
+        <ListBox ItemsSource="{Binding Lines}"
+                 FontFamily="Consolas"
+                 FontSize="12" />
+    </Grid>
+</Window>
