@@ -21,7 +21,8 @@ public sealed class ModPackUpdateService(
     IDownloader downloader,
     IHashVerifier hashVerifier,
     ModPlatformResolver platformResolver,
-    IUpdateTransaction updateTransaction) : IModPackUpdateService
+    IUpdateTransaction updateTransaction,
+    LauncherUserAgent userAgent) : IModPackUpdateService
 {
     public Task RecoverAsync(CancellationToken cancellationToken)
     {
@@ -37,7 +38,7 @@ public sealed class ModPackUpdateService(
 
         var mods = modsTask.Result ?? [];
         var version = versionTask.Result ?? new VersionInfoResponse(null, null, null, null, null);
-        var javaSpec = javaSpecTask.Result ?? new JavaRuntimeSpec("eclipse", 21, "unknown", "jre", "", "");
+        var javaSpec = javaSpecTask.Result ?? new JavaRuntimeSpec("eclipse", 21, "unknown", "jre", "");
         var remoteMods = mods
             .Select(ToRemoteModEntry)
             .Where(static entry => entry is not null)
@@ -252,7 +253,7 @@ public sealed class ModPackUpdateService(
     private async Task<T?> GetJsonAsync<T>(string uri, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.UserAgent.ParseAdd("FireflyMC-Launcher");
+        request.Headers.UserAgent.ParseAdd(userAgent.Value);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

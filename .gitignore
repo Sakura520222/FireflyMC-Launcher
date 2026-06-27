@@ -5,3 +5,6 @@ obj/
 *.user
 *.suo
 TestResults/
+fireflymc-ed25519-private.pem
+generate_ed25519.py
+tools/sign_release.py

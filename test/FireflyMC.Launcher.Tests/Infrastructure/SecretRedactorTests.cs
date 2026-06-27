@@ -1,4 +1,5 @@
 using FireflyMC.Launcher.Infrastructure.Crypto;
+using FluentAssertions;
 
 namespace FireflyMC.Launcher.Tests.Infrastructure;
 
@@ -11,10 +12,10 @@ public sealed class SecretRedactorTests
 
         var redacted = SecretRedactor.Redact(text);
 
-        Assert.DoesNotContain("secret", redacted);
-        Assert.DoesNotContain("token 192", redacted);
-        Assert.DoesNotContain("192.168.1.12", redacted);
-        Assert.Contains("<redacted>", redacted);
-        Assert.Contains("<ip>", redacted);
+        redacted.Should().NotContain("secret");
+        redacted.Should().NotContain("token 192");
+        redacted.Should().NotContain("192.168.1.12");
+        redacted.Should().Contain("<redacted>");
+        redacted.Should().Contain("<ip>");
     }
 }

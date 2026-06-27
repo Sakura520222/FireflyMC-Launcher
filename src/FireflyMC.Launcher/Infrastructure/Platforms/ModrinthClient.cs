@@ -1,22 +1,62 @@
 using System.Text.Json;
+using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Models.Remote;
 
 namespace FireflyMC.Launcher.Infrastructure.Platforms;
 
-public sealed class ModrinthClient(HttpClient httpClient) : IModPlatformClient
+public sealed class ModrinthClient(
+    HttpClient httpClient,
+    LauncherConfiguration configuration,
+    MirrorRouter mirrorRouter,
+    LauncherUserAgent userAgent) : IModPlatformClient
 {
     public async Task<ResolvedModFile> ResolveAsync(RemoteModEntry entry, string minecraftVersion, string loader, CancellationToken cancellationToken)
     {
-        var url = $"https://api.modrinth.com/v2/project/{Uri.EscapeDataString(entry.ProjectId)}/version"
-            + $"?loaders=[\"{Uri.EscapeDataString(loader)}\"]&game_versions=[\"{Uri.EscapeDataString(minecraftVersion)}\"]";
+        var errors = new List<Exception>();
+        foreach (var source in new[]
+        {
+            new ModrinthSource(configuration.Mirrors.ModrinthApiPrimary, UseMirrorFiles: false, IsMcim: false),
+            new ModrinthSource(configuration.Mirrors.ModrinthApiMirror, UseMirrorFiles: true, IsMcim: true)
+        })
+        {
+            try
+            {
+                var resolved = await TryResolveAsync(source, entry, minecraftVersion, loader, cancellationToken);
+                if (resolved is not null)
+                {
+                    return resolved;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errors.Add(ex);
+            }
+        }
+
+        throw new InvalidOperationException($"Unable to resolve Modrinth file for {entry.Name} ({entry.ProjectId}).", errors.FirstOrDefault());
+    }
+
+    private async Task<ResolvedModFile?> TryResolveAsync(
+        ModrinthSource source,
+        RemoteModEntry entry,
+        string minecraftVersion,
+        string loader,
+        CancellationToken cancellationToken)
+    {
+        var url = BuildVersionsUri(source.ApiBase, entry.ProjectId, minecraftVersion, loader);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.ParseAdd("FireflyMC-Launcher");
+        request.Headers.UserAgent.ParseAdd(userAgent.Value);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
+        if (source.IsMcim)
+        {
+            McimCachePolicy.EnsureFresh(response, configuration.Update);
+        }
+
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-
         foreach (var version in document.RootElement.EnumerateArray())
         {
             if (!MatchesVersion(entry, version))
@@ -27,7 +67,7 @@ public sealed class ModrinthClient(HttpClient httpClient) : IModPlatformClient
             var file = PickPrimaryFile(entry, version);
             if (file is not null)
             {
-                return file with { Entry = entry };
+                return RewriteDownloadUri(file with { Entry = entry }, source);
             }
         }
 
@@ -36,11 +76,26 @@ public sealed class ModrinthClient(HttpClient httpClient) : IModPlatformClient
             var file = PickPrimaryFile(entry, version);
             if (file is not null)
             {
-                return file with { Entry = entry };
+                return RewriteDownloadUri(file with { Entry = entry }, source);
             }
         }
 
-        throw new InvalidOperationException($"Unable to resolve Modrinth file for {entry.Name} ({entry.ProjectId}).");
+        return null;
+    }
+
+    private ResolvedModFile RewriteDownloadUri(ResolvedModFile resolved, ModrinthSource source)
+    {
+        return source.UseMirrorFiles
+            ? resolved with { DownloadUri = mirrorRouter.RewriteModrinthFileToMirror(resolved.DownloadUri) }
+            : resolved;
+    }
+
+    private static Uri BuildVersionsUri(string apiBase, string projectId, string minecraftVersion, string loader)
+    {
+        var root = apiBase.TrimEnd('/');
+        var loaderQuery = Uri.EscapeDataString($"[\"{loader}\"]");
+        var gameVersionQuery = Uri.EscapeDataString($"[\"{minecraftVersion}\"]");
+        return new Uri($"{root}/v2/project/{Uri.EscapeDataString(projectId)}/version?loaders={loaderQuery}&game_versions={gameVersionQuery}");
     }
 
     private static bool MatchesVersion(RemoteModEntry entry, JsonElement version)
@@ -103,4 +158,6 @@ public sealed class ModrinthClient(HttpClient httpClient) : IModPlatformClient
             ? value.GetString()
             : null;
     }
+
+    private sealed record ModrinthSource(string ApiBase, bool UseMirrorFiles, bool IsMcim);
 }

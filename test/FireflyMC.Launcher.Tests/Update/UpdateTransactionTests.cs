@@ -2,6 +2,7 @@ using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Models.Remote;
 using FireflyMC.Launcher.Services.Update;
+using FluentAssertions;
 
 namespace FireflyMC.Launcher.Tests.Update;
 
@@ -29,8 +30,8 @@ public sealed class UpdateTransactionTests
             null,
             CancellationToken.None));
 
-        Assert.Equal("old", await File.ReadAllTextAsync(target));
-        Assert.False(File.Exists(paths.TransactionFile));
+        (await File.ReadAllTextAsync(target)).Should().Be("old");
+        File.Exists(paths.TransactionFile).Should().BeFalse();
     }
 
     [Fact]
@@ -47,8 +48,8 @@ public sealed class UpdateTransactionTests
 
         await transaction.ExecuteAsync(plan, _ => staged, () => Task.CompletedTask, null, CancellationToken.None);
 
-        Assert.Equal("new", await File.ReadAllTextAsync(paths.GetAbsoluteGamePath("mods/a.jar")));
-        Assert.False(File.Exists(paths.TransactionFile));
+        (await File.ReadAllTextAsync(paths.GetAbsoluteGamePath("mods/a.jar"))).Should().Be("new");
+        File.Exists(paths.TransactionFile).Should().BeFalse();
     }
 
     private static UpdatePlan NewPlan(string relativePath)

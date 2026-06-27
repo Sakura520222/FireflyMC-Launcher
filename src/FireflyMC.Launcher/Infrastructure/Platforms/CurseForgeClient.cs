@@ -1,25 +1,26 @@
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Models.Remote;
 
 namespace FireflyMC.Launcher.Infrastructure.Platforms;
 
-public sealed class CurseForgeClient(HttpClient httpClient, CurseForgeOptions options) : IModPlatformClient
+public sealed class CurseForgeClient(
+    HttpClient httpClient,
+    LauncherConfiguration configuration,
+    MirrorRouter mirrorRouter,
+    LauncherUserAgent userAgent) : IModPlatformClient
 {
     public async Task<ResolvedModFile> ResolveAsync(RemoteModEntry entry, string minecraftVersion, string loader, CancellationToken cancellationToken)
     {
-        var url = $"https://bmclapi2.bangbang93.com/curseforge/v1/mods/{Uri.EscapeDataString(entry.ProjectId)}/files"
-            + $"?gameVersion={Uri.EscapeDataString(minecraftVersion)}&modLoaderType=6";
+        var url = $"{configuration.Mirrors.CurseForgeApiMirror.TrimEnd('/')}/v1/mods/{Uri.EscapeDataString(entry.ProjectId)}/files"
+            + $"?gameVersion={Uri.EscapeDataString(minecraftVersion)}";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.ParseAdd(options.UserAgent);
-        if (!string.IsNullOrWhiteSpace(options.ApiKey))
-        {
-            request.Headers.TryAddWithoutValidation("x-api-key", options.ApiKey);
-        }
-
+        request.Headers.UserAgent.ParseAdd(userAgent.Value);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
+        McimCachePolicy.EnsureFresh(response, configuration.Update);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         var files = document.RootElement.TryGetProperty("data", out var data) ? data : document.RootElement;
@@ -28,20 +29,22 @@ public sealed class CurseForgeClient(HttpClient httpClient, CurseForgeOptions op
             throw new InvalidOperationException($"Unexpected CurseForge response for {entry.Name}.");
         }
 
-        JsonElement? selected = null;
-        foreach (var file in files.EnumerateArray())
+        var compatibleFiles = files.EnumerateArray()
+            .Where(file => IsCompatible(file, minecraftVersion, loader))
+            .OrderByDescending(GetFileDate)
+            .ToArray();
+        if (compatibleFiles.Length == 0)
         {
-            if (!MatchesVersion(entry, file))
-            {
-                continue;
-            }
-
-            selected = file;
-            break;
+            throw new InvalidOperationException($"No CurseForge NeoForge {minecraftVersion} files for {entry.Name} ({entry.ProjectId}).");
         }
 
-        selected ??= files.EnumerateArray().FirstOrDefault();
-        if (selected is null)
+        JsonElement? selected = compatibleFiles.FirstOrDefault(file => MatchesVersion(entry, file));
+        if (selected is null || selected.Value.ValueKind == JsonValueKind.Undefined)
+        {
+            selected = compatibleFiles[0];
+        }
+
+        if (selected is null || selected.Value.ValueKind == JsonValueKind.Undefined)
         {
             throw new InvalidOperationException($"Unable to resolve CurseForge file for {entry.Name} ({entry.ProjectId}).");
         }
@@ -52,7 +55,7 @@ public sealed class CurseForgeClient(HttpClient httpClient, CurseForgeOptions op
         if (string.IsNullOrWhiteSpace(urlValue))
         {
             var fileId = selectedFile.TryGetProperty("id", out var idElement) ? idElement.GetInt64() : 0;
-            urlValue = $"https://bmclapi2.bangbang93.com/curseforge/v1/mods/{entry.ProjectId}/files/{fileId}/download";
+            urlValue = $"{configuration.Mirrors.CurseForgeApiMirror.TrimEnd('/')}/v1/mods/{entry.ProjectId}/files/{fileId}/download";
         }
 
         var sha1 = "";
@@ -72,7 +75,25 @@ public sealed class CurseForgeClient(HttpClient httpClient, CurseForgeOptions op
         var size = selectedFile.TryGetProperty("fileLength", out var fileLength) && fileLength.TryGetInt64(out var parsedSize)
             ? parsedSize
             : entry.FileSize;
-        return new ResolvedModFile(entry, fileName, size, sha1, new Uri(urlValue));
+        return new ResolvedModFile(entry, fileName, size, sha1, mirrorRouter.RewriteCurseForgeFileToMirror(new Uri(urlValue)));
+    }
+
+    private static bool IsCompatible(JsonElement file, string minecraftVersion, string loader)
+    {
+        if (!file.TryGetProperty("gameVersions", out var gameVersions) || gameVersions.ValueKind != JsonValueKind.Array)
+        {
+            return true;
+        }
+
+        return gameVersions.EnumerateArray().Any(version => version.GetString()?.Equals(minecraftVersion, StringComparison.OrdinalIgnoreCase) == true)
+            && gameVersions.EnumerateArray().Any(version => IsLoaderVersion(version.GetString(), loader));
+    }
+
+    private static bool IsLoaderVersion(string? value, string loader)
+    {
+        return value?.Equals(loader, StringComparison.OrdinalIgnoreCase) == true
+            || (loader.Equals("neoforge", StringComparison.OrdinalIgnoreCase)
+                && value?.Equals("NeoForge", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     private static bool MatchesVersion(RemoteModEntry entry, JsonElement file)
@@ -86,8 +107,17 @@ public sealed class CurseForgeClient(HttpClient httpClient, CurseForgeOptions op
         }
 
         var label = entry.VersionLabel;
-        return TryGetString(file, "displayName")?.Contains(label, StringComparison.OrdinalIgnoreCase) == true
+        return TryGetString(file, "displayName")?.Equals(label, StringComparison.OrdinalIgnoreCase) == true
+            || TryGetString(file, "fileName")?.Equals(label, StringComparison.OrdinalIgnoreCase) == true
+            || TryGetString(file, "displayName")?.Contains(label, StringComparison.OrdinalIgnoreCase) == true
             || TryGetString(file, "fileName")?.Contains(label, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static DateTimeOffset GetFileDate(JsonElement file)
+    {
+        return TryGetString(file, "fileDate") is { } value && DateTimeOffset.TryParse(value, out var parsed)
+            ? parsed
+            : DateTimeOffset.MinValue;
     }
 
     private static string StripChinesePrefix(string value)

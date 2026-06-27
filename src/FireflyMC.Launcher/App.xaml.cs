@@ -63,12 +63,19 @@ public partial class App : Application
     private static ServiceProvider ConfigureServices()
     {
         var configuration = LauncherConfiguration.Load(Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
+        var userAgent = LauncherUserAgent.Create(configuration);
         var services = new ServiceCollection();
         services.AddSingleton(configuration);
+        services.AddSingleton(userAgent);
         services.AddSingleton(configuration.MicrosoftAuth);
         services.AddSingleton(configuration.CurseForge);
         services.AddSingleton(configuration.Update);
-        services.AddSingleton<HttpClient>();
+        services.AddSingleton(_ =>
+        {
+            var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent.Value);
+            return httpClient;
+        });
         services.AddSingleton<ILauncherPaths, LauncherPaths>();
         services.AddSingleton<IAccountStore, JsonAccountStore>();
         services.AddSingleton<ISettingsStore, JsonSettingsStore>();

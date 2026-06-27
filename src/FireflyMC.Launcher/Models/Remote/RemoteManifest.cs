@@ -34,7 +34,6 @@ public sealed record JavaRuntimeSpec(
     int Major,
     string RuntimeVersion,
     string ImageType,
-    string Sha256,
     string Url);
 
 public sealed record GameServerSpec(string Host, int Port);

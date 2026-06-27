@@ -12,12 +12,13 @@ public sealed class SelfUpdateService(
     HttpClient httpClient,
     LauncherConfiguration configuration,
     ILauncherPaths paths,
-    IDownloader downloader) : ISelfUpdateService
+    IDownloader downloader,
+    LauncherUserAgent userAgent) : ISelfUpdateService
 {
     public async Task<LauncherUpdateInfo?> CheckAsync(CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, configuration.SelfUpdate.ReleasesApi);
-        request.Headers.UserAgent.ParseAdd("FireflyMC-Launcher");
+        request.Headers.UserAgent.ParseAdd(userAgent.Value);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

@@ -89,7 +89,7 @@ public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOpt
     {
         if (string.IsNullOrWhiteSpace(options.ClientId))
         {
-            throw new InvalidOperationException("MicrosoftAuth.ClientId 未配置。请在 appsettings.json 中填入 FireflyMC Entra Public client_id。");
+            throw new InvalidOperationException("MicrosoftAuth.ClientId 未配置。请在 appsettings.json 中填入 Microsoft OAuth public client_id。");
         }
     }
 

@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\FireflyMC.Launcher\FireflyMC.Launcher.csproj" />
+    <ProjectReference Include="..\..\src\FireflyMC.Updater\FireflyMC.Updater.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 using FireflyMC.Launcher.Services.Accounts.Offline;
+using FluentAssertions;
 
 namespace FireflyMC.Launcher.Tests.Authentication;
 
@@ -11,6 +12,6 @@ public sealed class OfflineUuidProviderTests
 
         var uuid = provider.GetUuidString("Steve");
 
-        Assert.Equal("5627dd98e6be3c21b8a8e92344183641", uuid);
+        uuid.Should().Be("5627dd98e6be3c21b8a8e92344183641");
     }
 }
