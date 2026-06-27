@@ -45,6 +45,14 @@ public sealed class LauncherOperationCoordinator : ILauncherOperationCoordinator
         }
     }
 
+    /// 操作失败：记录异常详情到诊断日志后置 <see cref="LauncherOperationState.Failed"/>。
+    /// 调用方 catch 异常时应走这里，避免失败原因只进 UI 不进日志。
+    public void Fail(Exception exception)
+    {
+        _logger.LogError("操作失败", exception);
+        SetState(LauncherOperationState.Failed, canCancel: false);
+    }
+
     private void Release()
     {
         _logger.LogInformation($"操作结束，回到 {nameof(LauncherOperationState.Idle)}");

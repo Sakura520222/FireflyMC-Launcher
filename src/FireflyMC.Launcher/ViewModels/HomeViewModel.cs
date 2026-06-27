@@ -78,7 +78,7 @@ public sealed partial class HomeViewModel(
         }
         catch (Exception ex)
         {
-            coordinator.SetState(LauncherOperationState.Failed, canCancel: false);
+            coordinator.Fail(ex);
             Status = ex.Message;
         }
     }

@@ -10,6 +10,7 @@ public interface ILauncherOperationCoordinator
     event EventHandler? StateChanged;
     Task<IDisposable> BeginAsync(LauncherOperationState state, bool canCancel, CancellationToken cancellationToken);
     void SetState(LauncherOperationState state, bool canCancel);
+    void Fail(Exception exception);
     void Cancel();
     CancellationToken CurrentCancellationToken { get; }
 }
