@@ -4,11 +4,6 @@ using Xunit;
 
 namespace FireflyMC.Launcher.Tests.Update;
 
-/// <summary>
-/// 验证 Updater 的纯 C# Ed25519 验签实现。
-/// 测试向量由 Python cryptography 库（已知正确实现）用与 appsettings 相同的密钥生成：
-///   公钥 69aBvg...KT0= 与 SelfUpdate.PublicKey 一致。
-/// </summary>
 public class Ed25519VerifierTests
 {
     private const string PublicKeyB64 = "69aBvgTl2ZInogiFQ+qogD+W6ZxOmEL4Gz22Zyt/KT0=";
