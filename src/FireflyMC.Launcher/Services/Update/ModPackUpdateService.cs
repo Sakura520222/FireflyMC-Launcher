@@ -31,7 +31,7 @@ public sealed class ModPackUpdateService(
 
     public async Task<RemoteManifest> ResolveRemoteManifestAsync(CancellationToken cancellationToken)
     {
-        var modsTask = GetJsonAsync<IReadOnlyList<ModEntryResponse>>(configuration.FireflyApi.PackMods, cancellationToken);
+        var modsTask = GetPackModsAsync(cancellationToken);
         var versionTask = GetJsonAsync<VersionInfoResponse>(configuration.FireflyApi.Version, cancellationToken);
         var javaSpecTask = JsonFile.ReadAsync(Path.Combine(AppContext.BaseDirectory, "java-spec.json"), JsonContext.Default.JavaRuntimeSpec, cancellationToken);
         await Task.WhenAll(modsTask, versionTask, javaSpecTask);
@@ -258,6 +258,29 @@ public sealed class ModPackUpdateService(
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return await JsonSerializer.DeserializeAsync<T>(stream, cancellationToken: cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ModEntryResponse>> GetPackModsAsync(CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, configuration.FireflyApi.PackMods);
+        request.Headers.UserAgent.ParseAdd(userAgent.Value);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (document.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            return JsonSerializer.Deserialize<IReadOnlyList<ModEntryResponse>>(document.RootElement.GetRawText()) ?? [];
+        }
+
+        if (document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty("mods", out var mods)
+            && mods.ValueKind == JsonValueKind.Array)
+        {
+            return JsonSerializer.Deserialize<IReadOnlyList<ModEntryResponse>>(mods.GetRawText()) ?? [];
+        }
+
+        throw new InvalidOperationException("Unexpected /api/pack/mods response shape.");
     }
 
     private static RemoteModEntry? ToRemoteModEntry(ModEntryResponse response)

@@ -2,6 +2,11 @@ using System.Text.Json.Serialization;
 
 namespace FireflyMC.Launcher.Contracts.FireflyApi;
 
+public sealed record PackModsResponse(
+    [property: JsonPropertyName("importedAt")] long? ImportedAt,
+    [property: JsonPropertyName("count")] int? Count,
+    [property: JsonPropertyName("mods")] IReadOnlyList<ModEntryResponse>? Mods);
+
 public sealed record ModEntryResponse(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("fileName")] string? FileName,

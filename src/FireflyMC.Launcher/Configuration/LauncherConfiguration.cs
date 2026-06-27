@@ -25,14 +25,30 @@ public sealed class LauncherConfiguration
         }
 
         var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize(json, JsonContext.Default.LauncherConfiguration)
+        var configuration = JsonSerializer.Deserialize(json, JsonContext.Default.LauncherConfiguration)
             ?? new LauncherConfiguration();
+        return WithDefaults(configuration);
+    }
+
+    private static LauncherConfiguration WithDefaults(LauncherConfiguration configuration)
+    {
+        return new LauncherConfiguration
+        {
+            UserAgent = configuration.UserAgent ?? "",
+            MicrosoftAuth = configuration.MicrosoftAuth ?? new MicrosoftAuthOptions(),
+            CurseForge = configuration.CurseForge ?? new CurseForgeOptions(),
+            SelfUpdate = configuration.SelfUpdate ?? new SelfUpdateOptions(),
+            Game = configuration.Game ?? new GameOptions(),
+            Mirrors = configuration.Mirrors ?? new MirrorOptions(),
+            Update = configuration.Update ?? new UpdateOptions(),
+            FireflyApi = configuration.FireflyApi ?? new FireflyApiOptions()
+        };
     }
 }
 
 public sealed class MicrosoftAuthOptions
 {
-    public string ClientId { get; init; } = "00000000402b5328";
+    public string ClientId { get; init; } = "";
     public string Tenant { get; init; } = "consumers";
     public IReadOnlyList<string> Scopes { get; init; } = ["XboxLive.signin", "offline_access"];
 }
@@ -97,7 +113,7 @@ public sealed record LauncherUserAgent(string Value)
             : "1.0.0";
         var fallback = $"FireflyMC-Launcher/{version} (https://github.com/Sakura520222/FireflyMC-Launcher)";
         var configured = string.IsNullOrWhiteSpace(configuration.UserAgent)
-            ? configuration.CurseForge.UserAgent
+            ? configuration.CurseForge?.UserAgent
             : configuration.UserAgent;
         if (string.IsNullOrWhiteSpace(configured))
         {
@@ -109,6 +125,13 @@ public sealed record LauncherUserAgent(string Value)
 }
 
 [JsonSerializable(typeof(LauncherConfiguration))]
+[JsonSerializable(typeof(MicrosoftAuthOptions))]
+[JsonSerializable(typeof(CurseForgeOptions))]
+[JsonSerializable(typeof(SelfUpdateOptions))]
+[JsonSerializable(typeof(GameOptions))]
+[JsonSerializable(typeof(MirrorOptions))]
+[JsonSerializable(typeof(UpdateOptions))]
+[JsonSerializable(typeof(FireflyApiOptions))]
 [JsonSerializable(typeof(JavaRuntimeSpec))]
 [JsonSerializable(typeof(LauncherSettings))]
 [JsonSerializable(typeof(IReadOnlyList<FireflyMC.Launcher.Models.Accounts.AccountProfile>))]

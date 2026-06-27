@@ -9,7 +9,6 @@
         </Grid.RowDefinitions>
         <TextBlock Text="账号" FontSize="28" FontWeight="SemiBold" Foreground="#111827" />
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,20,0,12">
-            <Button Content="添加微软账号" Command="{Binding AddMicrosoftCommand}" />
             <TextBox Width="180" Text="{Binding OfflineUsername, UpdateSourceTrigger=PropertyChanged}" />
             <Button Content="添加离线账号" Command="{Binding AddOfflineCommand}" />
             <Button Content="刷新" Command="{Binding RefreshCommand}" />
