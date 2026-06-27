@@ -1,3 +1,4 @@
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
@@ -8,7 +9,8 @@ public sealed class NeoForgeClientInstaller(
     ILauncherPaths paths,
     IDownloader downloader,
     MavenArtifactResolver artifactResolver,
-    ProcessorRunner processorRunner)
+    ProcessorRunner processorRunner,
+    IDiagnosticLogger logger)
 {
     public async Task InstallAsync(
         string javaExecutable,
@@ -21,9 +23,11 @@ public sealed class NeoForgeClientInstaller(
         var expectedVersionDir = Path.Combine(paths.VersionsDirectory, $"neoforge-{neoForgeVersion}");
         if (Directory.Exists(expectedVersionDir) && Directory.EnumerateFiles(expectedVersionDir, "*.json").Any())
         {
+            logger.LogDebug($"NeoForge {neoForgeVersion} 已安装，跳过");
             return;
         }
 
+        logger.LogInformation($"安装 NeoForge {neoForgeVersion}（MC {minecraftVersion}，{(useMirror ? "镜像" : "官方源")}）");
         Directory.CreateDirectory(paths.UpdateDirectory);
         var installerPath = Path.Combine(paths.UpdateDirectory, $"neoforge-{neoForgeVersion}-installer.jar");
         progress?.Report(new StageProgress(OperationStage.NeoForge, null, 55, "正在下载 NeoForge installer", 0, null, null, null, true));
@@ -35,5 +39,6 @@ public sealed class NeoForgeClientInstaller(
             paths.RootDirectory,
             null,
             cancellationToken);
+        logger.LogInformation($"NeoForge {neoForgeVersion} 安装完成");
     }
 }

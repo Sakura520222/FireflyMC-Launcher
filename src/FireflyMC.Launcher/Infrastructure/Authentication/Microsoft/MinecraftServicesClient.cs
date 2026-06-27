@@ -1,13 +1,15 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using FireflyMC.Launcher.Contracts.Authentication.Microsoft;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 
 namespace FireflyMC.Launcher.Infrastructure.Authentication.Microsoft;
 
-public sealed class MinecraftServicesClient(HttpClient httpClient) : IMinecraftServicesClient
+public sealed class MinecraftServicesClient(HttpClient httpClient, IDiagnosticLogger logger) : IMinecraftServicesClient
 {
     public async Task<MinecraftTokenResponse> LoginWithXboxAsync(string userHash, string xstsToken, CancellationToken cancellationToken)
     {
+        logger.LogDebug("用 Xbox 令牌登录 Minecraft 服务");
         var body = new
         {
             identityToken = $"XBL3.0 x={userHash};{xstsToken}"
@@ -21,11 +23,13 @@ public sealed class MinecraftServicesClient(HttpClient httpClient) : IMinecraftS
 
     public Task<MinecraftEntitlementsResponse> GetEntitlementsAsync(string minecraftAccessToken, CancellationToken cancellationToken)
     {
+        logger.LogDebug("查询 Minecraft 所有权");
         return GetAsync<MinecraftEntitlementsResponse>("https://api.minecraftservices.com/entitlements/mcstore", minecraftAccessToken, cancellationToken);
     }
 
     public Task<MinecraftProfileResponse> GetProfileAsync(string minecraftAccessToken, CancellationToken cancellationToken)
     {
+        logger.LogDebug("查询 Minecraft 档案");
         return GetAsync<MinecraftProfileResponse>("https://api.minecraftservices.com/minecraft/profile", minecraftAccessToken, cancellationToken);
     }
 

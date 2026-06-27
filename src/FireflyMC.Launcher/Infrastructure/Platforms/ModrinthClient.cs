@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Models.Remote;
@@ -10,10 +11,12 @@ public sealed class ModrinthClient(
     HttpClient httpClient,
     LauncherConfiguration configuration,
     MirrorRouter mirrorRouter,
-    LauncherUserAgent userAgent) : IModPlatformClient
+    LauncherUserAgent userAgent,
+    IDiagnosticLogger logger) : IModPlatformClient
 {
     public async Task<ResolvedModFile> ResolveAsync(RemoteModEntry entry, string minecraftVersion, string loader, CancellationToken cancellationToken)
     {
+        logger.LogDebug($"Modrinth 解析 {entry.ProjectId}（{entry.FileName}）");
         var errors = new List<Exception>();
         foreach (var source in new[]
         {
@@ -31,10 +34,12 @@ public sealed class ModrinthClient(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                logger.LogDebug($"Modrinth 源 {(source.IsMcim ? "MCIM 镜像" : "主源")} 解析失败，尝试下一源", ex);
                 errors.Add(ex);
             }
         }
 
+        logger.LogWarning($"Modrinth 解析失败：{entry.Name}（{entry.ProjectId}）", errors.FirstOrDefault());
         throw new InvalidOperationException($"Unable to resolve Modrinth file for {entry.Name} ({entry.ProjectId}).", errors.FirstOrDefault());
     }
 
@@ -46,6 +51,7 @@ public sealed class ModrinthClient(
         CancellationToken cancellationToken)
     {
         var url = BuildVersionsUri(source.ApiBase, entry.ProjectId, minecraftVersion, loader);
+        logger.LogDebug($"GET {url}");
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.UserAgent.ParseAdd(userAgent.Value);
         using var response = await httpClient.SendAsync(request, cancellationToken);

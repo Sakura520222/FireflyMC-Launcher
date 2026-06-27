@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
@@ -13,10 +14,13 @@ public sealed class SelfUpdateService(
     LauncherConfiguration configuration,
     ILauncherPaths paths,
     IDownloader downloader,
-    LauncherUserAgent userAgent) : ISelfUpdateService
+    LauncherUserAgent userAgent,
+    IDiagnosticLogger logger) : ISelfUpdateService
 {
     public async Task<LauncherUpdateInfo?> CheckAsync(CancellationToken cancellationToken)
     {
+        logger.LogInformation($"检查启动器更新（当前版本 {Assembly.GetExecutingAssembly().GetName().Version}，渠道 {configuration.SelfUpdate.Channel}）");
+        logger.LogDebug($"GET {configuration.SelfUpdate.ReleasesApi}");
         using var request = new HttpRequestMessage(HttpMethod.Get, configuration.SelfUpdate.ReleasesApi);
         request.Headers.UserAgent.ParseAdd(userAgent.Value);
         using var response = await httpClient.SendAsync(request, cancellationToken);
@@ -66,10 +70,12 @@ public sealed class SelfUpdateService(
 
             if (package is not null && signature is not null)
             {
+                logger.LogInformation($"发现新版本 {tag}");
                 return new LauncherUpdateInfo(version, tag, package, signature, TryGetString(release, "body") ?? "", prerelease);
             }
         }
 
+        logger.LogInformation("已是最新版本");
         return null;
     }
 
@@ -77,9 +83,11 @@ public sealed class SelfUpdateService(
     {
         if (string.IsNullOrWhiteSpace(configuration.SelfUpdate.PublicKey))
         {
+            logger.LogError("SelfUpdate.PublicKey 未配置，拒绝执行自更新");
             throw new InvalidOperationException("SelfUpdate.PublicKey 未配置，拒绝执行自更新。");
         }
 
+        logger.LogInformation($"开始自更新到 {updateInfo.Tag}");
         Directory.CreateDirectory(paths.UpdateDirectory);
         var packagePath = Path.Combine(paths.UpdateDirectory, $"launcher-{updateInfo.Tag}.zip");
         var signaturePath = Path.Combine(paths.UpdateDirectory, $"launcher-{updateInfo.Tag}.sig");
@@ -88,6 +96,7 @@ public sealed class SelfUpdateService(
         var updater = Path.Combine(AppContext.BaseDirectory, "FireflyMC.Updater.exe");
         if (!File.Exists(updater))
         {
+            logger.LogError($"Updater 不存在: {updater}");
             throw new FileNotFoundException("Updater.exe not found.", updater);
         }
 
@@ -101,6 +110,7 @@ public sealed class SelfUpdateService(
             "--launcher-pid", Environment.ProcessId.ToString(),
             "--nonce", nonce
         };
+        logger.LogInformation("拉起 Updater 进程，当前进程即将退出");
         Process.Start(new ProcessStartInfo(updater)
         {
             UseShellExecute = false,

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Models.Remote;
@@ -10,10 +11,12 @@ public sealed class CurseForgeClient(
     HttpClient httpClient,
     LauncherConfiguration configuration,
     MirrorRouter mirrorRouter,
-    LauncherUserAgent userAgent) : IModPlatformClient
+    LauncherUserAgent userAgent,
+    IDiagnosticLogger logger) : IModPlatformClient
 {
     public async Task<ResolvedModFile> ResolveAsync(RemoteModEntry entry, string minecraftVersion, string loader, CancellationToken cancellationToken)
     {
+        logger.LogDebug($"CurseForge 解析 {entry.ProjectId}（{entry.FileName}）");
         var url = $"{configuration.Mirrors.CurseForgeApiMirror.TrimEnd('/')}/v1/mods/{Uri.EscapeDataString(entry.ProjectId)}/files"
             + $"?gameVersion={Uri.EscapeDataString(minecraftVersion)}";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -26,6 +29,7 @@ public sealed class CurseForgeClient(
         var files = document.RootElement.TryGetProperty("data", out var data) ? data : document.RootElement;
         if (files.ValueKind != JsonValueKind.Array)
         {
+            logger.LogWarning($"CurseForge 返回非预期结构: {entry.Name}");
             throw new InvalidOperationException($"Unexpected CurseForge response for {entry.Name}.");
         }
 
@@ -35,6 +39,7 @@ public sealed class CurseForgeClient(
             .ToArray();
         if (compatibleFiles.Length == 0)
         {
+            logger.LogWarning($"CurseForge 未找到 MC {minecraftVersion} 的 NeoForge 文件: {entry.Name}（{entry.ProjectId}）");
             throw new InvalidOperationException($"No CurseForge NeoForge {minecraftVersion} files for {entry.Name} ({entry.ProjectId}).");
         }
 
@@ -46,6 +51,7 @@ public sealed class CurseForgeClient(
 
         if (selected is null || selected.Value.ValueKind == JsonValueKind.Undefined)
         {
+            logger.LogWarning($"无法定位 CurseForge 文件: {entry.Name}（{entry.ProjectId}）");
             throw new InvalidOperationException($"Unable to resolve CurseForge file for {entry.Name} ({entry.ProjectId}).");
         }
 

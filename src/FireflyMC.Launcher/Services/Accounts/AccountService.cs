@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models.Accounts;
 using FireflyMC.Launcher.Services.Accounts.Microsoft;
@@ -10,7 +11,8 @@ public sealed class AccountService(
     IAccountStore accountStore,
     ISecretStore secretStore,
     IOfflineAccountService offlineAccountService,
-    IMicrosoftAuthService microsoftAuthService) : IAccountService
+    IMicrosoftAuthService microsoftAuthService,
+    IDiagnosticLogger logger) : IAccountService
 {
     private readonly ConcurrentDictionary<string, AccountSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _refreshLocks = new(StringComparer.OrdinalIgnoreCase);
@@ -22,6 +24,7 @@ public sealed class AccountService(
 
     public Task<IDeviceCodeLoginSession> StartMicrosoftLoginAsync(CancellationToken cancellationToken)
     {
+        logger.LogInformation("发起 Microsoft 设备码登录");
         return microsoftAuthService.StartDeviceCodeLoginAsync(cancellationToken);
     }
 
@@ -36,6 +39,7 @@ public sealed class AccountService(
             .ToArray();
         await accountStore.SaveAsync(accounts, cancellationToken);
         _sessions[profile.Id] = accountSession;
+        logger.LogInformation($"Microsoft 账号登录完成: {profile.Id}");
         return profile;
     }
 
@@ -48,11 +52,13 @@ public sealed class AccountService(
             .OrderByDescending(static account => account.LastUsedAt)
             .ToArray();
         await accountStore.SaveAsync(accounts, cancellationToken);
+        logger.LogInformation($"添加离线账号: {profile.Id}");
         return profile;
     }
 
     public async Task LogoutAsync(string accountId, CancellationToken cancellationToken)
     {
+        logger.LogInformation($"账号登出: {accountId}");
         _sessions.TryRemove(accountId, out _);
         var accounts = (await accountStore.LoadAsync(cancellationToken))
             .Where(account => !string.Equals(account.Id, accountId, StringComparison.OrdinalIgnoreCase))
@@ -85,9 +91,11 @@ public sealed class AccountService(
             var credential = await secretStore.LoadMicrosoftCredentialAsync(profile.Id, cancellationToken);
             if (credential is null)
             {
+                logger.LogWarning($"未找到账号 {profile.Id} 的凭据，无法刷新会话");
                 return null;
             }
 
+            logger.LogDebug($"刷新账号 {profile.Id} 的 Microsoft 会话");
             var (session, updatedCredential) = await microsoftAuthService.RefreshAsync(credential, cancellationToken);
             await secretStore.SaveMicrosoftCredentialAsync(updatedCredential, cancellationToken);
             _sessions[profile.Id] = session;

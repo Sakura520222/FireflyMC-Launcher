@@ -1,9 +1,10 @@
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Models;
 
 namespace FireflyMC.Launcher.Infrastructure.Download;
 
-public sealed class HttpDownloader(HttpClient httpClient, UpdateOptions options) : IDownloader
+public sealed class HttpDownloader(HttpClient httpClient, UpdateOptions options, IDiagnosticLogger logger) : IDownloader
 {
     public async Task DownloadAsync(
         Uri uri,
@@ -15,6 +16,7 @@ public sealed class HttpDownloader(HttpClient httpClient, UpdateOptions options)
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
         var partPath = $"{destinationPath}.part";
         Exception? last = null;
+        logger.LogDebug($"下载 {uri} -> {Path.GetFileName(destinationPath)}");
 
         for (var attempt = 0; attempt <= options.MaxRetries; attempt++)
         {
@@ -36,11 +38,13 @@ public sealed class HttpDownloader(HttpClient httpClient, UpdateOptions options)
             catch (Exception ex) when (attempt < options.MaxRetries)
             {
                 last = ex;
+                logger.LogWarning($"下载失败（第 {attempt + 1}/{options.MaxRetries + 1} 次），{options.RetryBaseDelaySeconds * Math.Pow(2, attempt)}s 后重试: {uri}", ex);
                 var delay = TimeSpan.FromSeconds(options.RetryBaseDelaySeconds * Math.Pow(2, attempt));
                 await Task.Delay(delay, cancellationToken);
             }
         }
 
+        logger.LogError($"下载在 {options.MaxRetries + 1} 次尝试后仍失败: {uri}", last);
         throw new IOException($"Download failed after {options.MaxRetries + 1} attempts: {uri}", last);
     }
 

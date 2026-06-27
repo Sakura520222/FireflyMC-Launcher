@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using FireflyMC.Launcher.Configuration;
 using FireflyMC.Launcher.Infrastructure.Authentication.Microsoft;
 using FireflyMC.Launcher.Infrastructure.Crypto;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Minecraft;
 using FireflyMC.Launcher.Infrastructure.Minecraft.NeoForge;
@@ -31,19 +32,24 @@ public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
     private SingleInstanceService? _singleInstance;
+    private IDiagnosticLogger? _logger;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        RegisterExceptionHandlers();
         _serviceProvider = ConfigureServices();
+        _logger = _serviceProvider.GetRequiredService<IDiagnosticLogger>();
+        RegisterExceptionHandlers();
         var paths = _serviceProvider.GetRequiredService<ILauncherPaths>();
         paths.EnsureCreated();
+        _ = ApplyNetworkDiagnosticsSettingAsync();
+        _logger.LogInformation("启动器启动");
         ConfirmUpdateSuccess(paths, e.Args);
 
-        _singleInstance = new SingleInstanceService("FireflyMCLauncher");
+        _singleInstance = new SingleInstanceService("FireflyMCLauncher", _logger);
         if (!_singleInstance.StartOrSignal(ActivateMainWindow))
         {
+            _logger.LogInformation("已有实例运行，退出当前进程");
             Shutdown();
             return;
         }
@@ -51,10 +57,12 @@ public partial class App : Application
         var window = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = window;
         window.Show();
+        _logger.LogInformation("主窗口已显示");
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _logger?.LogInformation($"启动器退出（退出码 {e.ApplicationExitCode}）");
         _singleInstance?.Dispose();
         _serviceProvider?.Dispose();
         base.OnExit(e);
@@ -77,6 +85,11 @@ public partial class App : Application
             return httpClient;
         });
         services.AddSingleton<ILauncherPaths, LauncherPaths>();
+        services.AddSingleton<IDiagnosticLogger>(sp =>
+        {
+            var launcherPaths = sp.GetRequiredService<ILauncherPaths>();
+            return new FileDiagnosticLogger(launcherPaths.LogsDirectory);
+        });
         services.AddSingleton<IAccountStore, JsonAccountStore>();
         services.AddSingleton<ISettingsStore, JsonSettingsStore>();
         services.AddSingleton<ISecretStore, WindowsSecretStore>();
@@ -148,21 +161,54 @@ public partial class App : Application
         }
     }
 
-    private static void RegisterExceptionHandlers()
+    private async Task ApplyNetworkDiagnosticsSettingAsync()
+    {
+        try
+        {
+            var store = _serviceProvider!.GetRequiredService<ISettingsStore>();
+            var settings = await store.LoadAsync(CancellationToken.None);
+            _logger!.RecordNetworkDiagnostics = settings.RecordNetworkDiagnostics;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("加载网络诊断设置失败，使用默认值", ex);
+        }
+    }
+
+    private void RegisterExceptionHandlers()
     {
         Current.DispatcherUnhandledException += (_, e) =>
         {
+            _logger?.LogError("未处理的 UI 异常", e.Exception);
             MessageBox.Show(e.Exception.Message, "FireflyMC Launcher", MessageBoxButton.OK, MessageBoxImage.Error);
             e.Handled = true;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "last-crash.txt"), e.ExceptionObject.ToString());
+            if (_logger is null)
+            {
+                TryWriteCrashFallback("last-crash.txt", e.ExceptionObject?.ToString() ?? string.Empty);
+                return;
+            }
+
+            _logger.LogCritical("AppDomain 未处理异常", e.ExceptionObject as Exception);
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "last-task-error.txt"), e.Exception.ToString());
+            _logger?.LogError("未观察的 Task 异常", e.Exception);
             e.SetObserved();
         };
+    }
+
+    private static void TryWriteCrashFallback(string fileName, string content)
+    {
+        try
+        {
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, fileName), content);
+        }
+        catch
+        {
+            // 兜底写入失败时无可观测手段，忽略以避免在异常路径上再抛。
+        }
     }
 }

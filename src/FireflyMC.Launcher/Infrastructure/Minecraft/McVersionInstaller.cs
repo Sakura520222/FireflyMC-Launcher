@@ -1,16 +1,18 @@
 using System.IO.Compression;
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
 
 namespace FireflyMC.Launcher.Infrastructure.Minecraft;
 
-public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths paths, IDownloader downloader, LauncherConfiguration configuration)
+public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths paths, IDownloader downloader, LauncherConfiguration configuration, IDiagnosticLogger logger)
 {
     public async Task InstallAsync(string version, IProgress<StageProgress>? progress, CancellationToken cancellationToken)
     {
+        logger.LogInformation($"安装 Minecraft {version}");
         paths.EnsureCreated();
         var versionDir = Path.Combine(paths.VersionsDirectory, version);
         Directory.CreateDirectory(versionDir);
@@ -37,11 +39,13 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
         await DownloadLibrariesAsync(document.RootElement, progress, cancellationToken);
         await DownloadAssetsAsync(document.RootElement, progress, cancellationToken);
         await DownloadLoggingAsync(document.RootElement, versionDir, progress, cancellationToken);
+        logger.LogInformation($"Minecraft {version} 安装完成");
     }
 
     private async Task<Uri> ResolveVersionJsonUriAsync(string version, CancellationToken cancellationToken)
     {
         var manifestUri = $"{configuration.Mirrors.MinecraftPrimary}/mc/game/version_manifest_v2.json";
+        logger.LogDebug($"GET {manifestUri}");
         using var response = await httpClient.GetAsync(manifestUri, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -54,6 +58,7 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             }
         }
 
+        logger.LogError($"在版本清单中未找到 Minecraft {version}");
         throw new InvalidOperationException($"Minecraft version {version} not found in manifest.");
     }
 
@@ -87,6 +92,7 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             }
         }
 
+        logger.LogDebug($"下载 {nativeJars.Count} 个 native 库");
         var nativesDir = Path.Combine(paths.VersionsDirectory, "natives");
         Directory.CreateDirectory(nativesDir);
         foreach (var nativeJar in nativeJars)
@@ -133,6 +139,7 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             return;
         }
 
+        var assetCount = 0;
         foreach (var property in objects.EnumerateObject())
         {
             if (!property.Value.TryGetProperty("hash", out var hashElement) || hashElement.GetString() is not { } hash)
@@ -150,6 +157,12 @@ public sealed class McVersionInstaller(HttpClient httpClient, ILauncherPaths pat
             var url = $"https://resources.download.minecraft.net/{prefix}/{hash}";
             progress?.Report(new StageProgress(OperationStage.Minecraft, null, null, property.Name, 0, null, null, null, true));
             await downloader.DownloadAsync(new Uri(url), target, resume: true, progress, cancellationToken);
+            assetCount++;
+        }
+
+        if (assetCount > 0)
+        {
+            logger.LogDebug($"下载 {assetCount} 个资源文件");
         }
     }
 

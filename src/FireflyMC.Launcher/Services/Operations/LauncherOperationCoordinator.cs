@@ -1,3 +1,4 @@
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Models.Operations;
 
 namespace FireflyMC.Launcher.Services.Operations;
@@ -5,7 +6,13 @@ namespace FireflyMC.Launcher.Services.Operations;
 public sealed class LauncherOperationCoordinator : ILauncherOperationCoordinator
 {
     private readonly SemaphoreSlim _operationLock = new(1, 1);
+    private readonly IDiagnosticLogger _logger;
     private CancellationTokenSource? _currentCts;
+
+    public LauncherOperationCoordinator(IDiagnosticLogger logger)
+    {
+        _logger = logger;
+    }
 
     public LauncherOperationState State { get; private set; } = LauncherOperationState.Idle;
     public bool IsBusy => State != LauncherOperationState.Idle && State != LauncherOperationState.Failed;
@@ -25,6 +32,7 @@ public sealed class LauncherOperationCoordinator : ILauncherOperationCoordinator
     {
         State = state;
         CanCancel = canCancel;
+        _logger.LogInformation($"操作状态变更: {state}");
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -32,12 +40,14 @@ public sealed class LauncherOperationCoordinator : ILauncherOperationCoordinator
     {
         if (CanCancel)
         {
+            _logger.LogInformation("请求取消当前操作");
             _currentCts?.Cancel();
         }
     }
 
     private void Release()
     {
+        _logger.LogInformation($"操作结束，回到 {nameof(LauncherOperationState.Idle)}");
         _currentCts?.Dispose();
         _currentCts = null;
         State = LauncherOperationState.Idle;

@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Threading;
 using System.Windows;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 
 namespace FireflyMC.Launcher.Infrastructure.Windows;
 
@@ -10,10 +11,12 @@ public sealed class SingleInstanceService : IDisposable
     private readonly string _name;
     private readonly Mutex _mutex;
     private readonly CancellationTokenSource _cts = new();
+    private readonly IDiagnosticLogger _logger;
 
-    public SingleInstanceService(string name)
+    public SingleInstanceService(string name, IDiagnosticLogger logger)
     {
         _name = name;
+        _logger = logger;
         _mutex = new Mutex(initiallyOwned: true, name: $@"Global\{name}", out var createdNew);
         IsFirstInstance = createdNew;
     }
@@ -24,10 +27,12 @@ public sealed class SingleInstanceService : IDisposable
     {
         if (!IsFirstInstance)
         {
+            _logger.LogInformation("检测到已有实例运行，发送激活信号后退出");
             SignalExistingInstance();
             return false;
         }
 
+        _logger.LogInformation("以首个实例启动，开始监听激活请求");
         _ = ListenAsync(activate, _cts.Token);
         return true;
     }
@@ -62,6 +67,7 @@ public sealed class SingleInstanceService : IDisposable
             }
             catch
             {
+                // 监听循环中的瞬时错误忽略后继续等待下一次连接，避免刷屏。
             }
         }
     }
@@ -75,8 +81,9 @@ public sealed class SingleInstanceService : IDisposable
             using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
             writer.WriteLine("activate");
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning("向已有实例发送激活信号失败", ex);
         }
     }
 }

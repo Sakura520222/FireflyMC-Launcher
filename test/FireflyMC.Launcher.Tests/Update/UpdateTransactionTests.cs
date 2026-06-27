@@ -1,3 +1,4 @@
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Models.Remote;
@@ -20,7 +21,7 @@ public sealed class UpdateTransactionTests
         var staged = Path.Combine(paths.StagingDirectory, "mods", "a.jar");
         Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
         await File.WriteAllTextAsync(staged, "new");
-        var transaction = new UpdateTransaction(paths);
+        var transaction = new UpdateTransaction(paths, new NullDiagnosticLogger());
         var plan = NewPlan("mods/a.jar");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.ExecuteAsync(
@@ -43,7 +44,7 @@ public sealed class UpdateTransactionTests
         var staged = Path.Combine(paths.StagingDirectory, "mods", "a.jar");
         Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
         await File.WriteAllTextAsync(staged, "new");
-        var transaction = new UpdateTransaction(paths);
+        var transaction = new UpdateTransaction(paths, new NullDiagnosticLogger());
         var plan = NewPlan("mods/a.jar");
 
         await transaction.ExecuteAsync(plan, _ => staged, () => Task.CompletedTask, null, CancellationToken.None);

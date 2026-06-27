@@ -2,14 +2,16 @@ using System.Net;
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
 using FireflyMC.Launcher.Contracts.Authentication.Microsoft;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 
 namespace FireflyMC.Launcher.Infrastructure.Authentication.Microsoft;
 
-public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOptions options) : IMicrosoftOAuthClient
+public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOptions options, IDiagnosticLogger logger) : IMicrosoftOAuthClient
 {
     public async Task<DeviceCodeResponse> RequestDeviceCodeAsync(CancellationToken cancellationToken)
     {
         EnsureClientConfigured();
+        logger.LogDebug("请求 Microsoft 设备码");
         var uri = $"https://login.microsoftonline.com/{options.Tenant}/oauth2/v2.0/devicecode";
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -26,6 +28,7 @@ public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOpt
     public async Task<MicrosoftTokenResponse> PollTokenAsync(DeviceCodeResponse deviceCode, CancellationToken cancellationToken)
     {
         EnsureClientConfigured();
+        logger.LogDebug("开始轮询 Microsoft 设备码令牌");
         var interval = Math.Max(1, deviceCode.Interval);
         var deadline = DateTimeOffset.UtcNow.AddSeconds(deviceCode.ExpiresIn);
         while (DateTimeOffset.UtcNow < deadline)
@@ -55,10 +58,13 @@ public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOpt
                     interval += 5;
                     continue;
                 case "authorization_declined":
+                    logger.LogWarning("用户拒绝了 Microsoft 登录授权");
                     throw new InvalidOperationException("用户拒绝了 Microsoft 登录授权。");
                 case "expired_token":
+                    logger.LogWarning("设备代码已过期");
                     throw new TimeoutException("设备代码已过期，请重新获取代码。");
                 case "bad_verification_code":
+                    logger.LogWarning("设备代码无效");
                     throw new InvalidOperationException("设备代码无效，请重新获取代码。");
                 default:
                     throw new InvalidOperationException(error?.ErrorDescription ?? $"Microsoft token polling failed: {response.StatusCode}");
@@ -71,6 +77,7 @@ public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOpt
     public async Task<MicrosoftTokenResponse> RefreshAsync(string refreshToken, CancellationToken cancellationToken)
     {
         EnsureClientConfigured();
+        logger.LogDebug("使用 refresh_token 刷新 Microsoft 令牌");
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
@@ -89,6 +96,7 @@ public sealed class MicrosoftOAuthClient(HttpClient httpClient, MicrosoftAuthOpt
     {
         if (string.IsNullOrWhiteSpace(options.ClientId))
         {
+            logger.LogError("MicrosoftAuth.ClientId 未配置，无法执行 OAuth 流程");
             throw new InvalidOperationException("MicrosoftAuth.ClientId 未配置。请在 appsettings.json 中填入 Microsoft OAuth public client_id。");
         }
     }

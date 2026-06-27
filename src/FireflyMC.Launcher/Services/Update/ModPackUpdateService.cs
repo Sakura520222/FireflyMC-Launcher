@@ -4,6 +4,7 @@ using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
 using FireflyMC.Launcher.Contracts.FireflyApi;
 using FireflyMC.Launcher.Infrastructure.Crypto;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Platforms;
 using FireflyMC.Launcher.Infrastructure.Storage;
@@ -22,7 +23,8 @@ public sealed class ModPackUpdateService(
     IHashVerifier hashVerifier,
     ModPlatformResolver platformResolver,
     IUpdateTransaction updateTransaction,
-    LauncherUserAgent userAgent) : IModPackUpdateService
+    LauncherUserAgent userAgent,
+    IDiagnosticLogger logger) : IModPackUpdateService
 {
     public Task RecoverAsync(CancellationToken cancellationToken)
     {
@@ -31,6 +33,7 @@ public sealed class ModPackUpdateService(
 
     public async Task<RemoteManifest> ResolveRemoteManifestAsync(CancellationToken cancellationToken)
     {
+        logger.LogDebug("解析远程整合包清单");
         var modsTask = GetPackModsAsync(cancellationToken);
         var versionTask = GetJsonAsync<VersionInfoResponse>(configuration.FireflyApi.Version, cancellationToken);
         var javaSpecTask = JsonFile.ReadAsync(Path.Combine(AppContext.BaseDirectory, "java-spec.json"), JsonContext.Default.JavaRuntimeSpec, cancellationToken);
@@ -58,6 +61,7 @@ public sealed class ModPackUpdateService(
             server = configuration.Game.Server
         });
         var sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+        logger.LogInformation($"远程清单已解析：{remoteMods.Length} 个 mod，整合包版本 {packVersion}，sha256 {sha256[..12]}");
         return new RemoteManifest(
             1,
             packVersion,
@@ -105,6 +109,7 @@ public sealed class ModPackUpdateService(
             catch (Exception ex)
             {
                 failures.Add(ex);
+                logger.LogWarning($"解析 mod 失败: {mod.FileName}（{(mod.Required ? "必需" : "可选")}）", ex);
                 if (mod.Required)
                 {
                     downloads.Add(new FileToDownload(
@@ -118,6 +123,7 @@ public sealed class ModPackUpdateService(
         var threshold = Math.Max(1, (int)Math.Ceiling(remoteManifest.Mods.Count * configuration.Update.ResolveFailureThresholdPercent / 100d));
         if (failures.Count > threshold)
         {
+            logger.LogError($"Mod 解析失败 {failures.Count}/{remoteManifest.Mods.Count}，超过阈值 {threshold}", failures[0]);
             throw new InvalidOperationException($"Mod file resolve failed for {failures.Count}/{remoteManifest.Mods.Count} entries, above threshold {threshold}.", failures[0]);
         }
 
@@ -133,6 +139,7 @@ public sealed class ModPackUpdateService(
         var javaChanged = installed is null
             || !string.Equals(installed.JavaRuntimeVersion, remoteManifest.Java.RuntimeVersion, StringComparison.OrdinalIgnoreCase);
 
+        logger.LogDebug($"更新计划：{downloads.Count} 下载，{deletes.Length} 删除，{keeps.Count} 保留，Firefly mod {(fireflyShouldDownload ? "需下载" : "保持")}，Java {(javaChanged ? "变更" : "不变")}");
         return new UpdatePlan(
             remoteManifest.ManifestSha256,
             downloads,
@@ -154,6 +161,7 @@ public sealed class ModPackUpdateService(
         var remote = await ResolveRemoteManifestAsync(cancellationToken);
         progress?.Report(new StageProgress(OperationStage.Plan, null, 5, "正在生成更新计划", 0, null, null, null, true));
         var plan = await BuildUpdatePlanAsync(remote, forceVerify: false, cancellationToken);
+        logger.LogInformation($"同步整合包：{plan.Downloads.Count} 下载，{plan.Deletes.Count} 删除");
         Directory.CreateDirectory(paths.StagingDirectory);
 
         var stagedRelativePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -169,6 +177,7 @@ public sealed class ModPackUpdateService(
             {
                 if (download.Required)
                 {
+                    logger.LogError($"必需 mod 未能解析，无法继续: {download.Source.Entry.Name}");
                     throw new InvalidOperationException($"Required mod could not be resolved: {download.Source.Entry.Name}");
                 }
 
@@ -183,9 +192,11 @@ public sealed class ModPackUpdateService(
             {
                 if (download.Required)
                 {
+                    logger.LogError($"必需文件 SHA-1 校验失败: {download.RelativePath}");
                     throw new InvalidDataException($"SHA-1 mismatch for required file {download.RelativePath}.");
                 }
 
+                logger.LogWarning($"可选文件 SHA-1 校验失败，跳过: {download.RelativePath}");
                 continue;
             }
 
@@ -203,6 +214,7 @@ public sealed class ModPackUpdateService(
             if (!string.IsNullOrWhiteSpace(firefly.Sha256)
                 && !await hashVerifier.VerifySha256Async(staged, firefly.Sha256, cancellationToken))
             {
+                logger.LogError("Firefly mod SHA-256 校验失败");
                 throw new InvalidDataException("Firefly mod SHA-256 mismatch.");
             }
 
@@ -247,6 +259,7 @@ public sealed class ModPackUpdateService(
             },
             progress,
             cancellationToken);
+        logger.LogInformation("整合包同步完成");
         return remote;
     }
 
@@ -254,6 +267,7 @@ public sealed class ModPackUpdateService(
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.UserAgent.ParseAdd(userAgent.Value);
+        logger.LogDebug($"GET {uri}");
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -264,6 +278,7 @@ public sealed class ModPackUpdateService(
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, configuration.FireflyApi.PackMods);
         request.Headers.UserAgent.ParseAdd(userAgent.Value);
+        logger.LogDebug($"GET {configuration.FireflyApi.PackMods}");
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

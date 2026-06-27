@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
@@ -6,7 +7,7 @@ using FireflyMC.Launcher.Models.Remote;
 
 namespace FireflyMC.Launcher.Infrastructure.Minecraft;
 
-public sealed class AdoptiumJavaRuntimeInstaller(ILauncherPaths paths, IDownloader downloader)
+public sealed class AdoptiumJavaRuntimeInstaller(ILauncherPaths paths, IDownloader downloader, IDiagnosticLogger logger)
 {
     public string JavaExecutable => Path.Combine(paths.JavaRuntimeDirectory, "bin", "java.exe");
 
@@ -14,9 +15,11 @@ public sealed class AdoptiumJavaRuntimeInstaller(ILauncherPaths paths, IDownload
     {
         if (File.Exists(JavaExecutable))
         {
+            logger.LogDebug($"Java {spec.RuntimeVersion} 已安装，跳过");
             return;
         }
 
+        logger.LogInformation($"下载并安装 Java {spec.RuntimeVersion}（{spec.Vendor} {spec.ImageType}）");
         Directory.CreateDirectory(paths.RuntimeDirectory);
         var archive = Path.Combine(paths.UpdateDirectory, $"java-{spec.RuntimeVersion.Replace('+', '_')}.zip");
         progress?.Report(new StageProgress(OperationStage.Java, null, 8, "正在下载 Java 21", 0, null, null, null, true));
@@ -36,5 +39,7 @@ public sealed class AdoptiumJavaRuntimeInstaller(ILauncherPaths paths, IDownload
         {
             Directory.Delete(temp, recursive: true);
         }
+
+        logger.LogInformation($"Java {spec.RuntimeVersion} 安装完成");
     }
 }

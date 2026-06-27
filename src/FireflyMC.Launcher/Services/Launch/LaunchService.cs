@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Minecraft;
 using FireflyMC.Launcher.Infrastructure.Process;
 using FireflyMC.Launcher.Infrastructure.Storage;
@@ -17,7 +18,8 @@ public sealed class LaunchService(
     IAccountService accountService,
     AdoptiumJavaRuntimeInstaller javaRuntimeInstaller,
     GameProcess gameProcess,
-    IGameLogService logService) : ILaunchService
+    IGameLogService logService,
+    IDiagnosticLogger logger) : ILaunchService
 {
     public async Task<LaunchProfile> BuildLaunchProfileAsync(AccountProfile account, CancellationToken cancellationToken)
     {
@@ -25,6 +27,7 @@ public sealed class LaunchService(
         var session = await accountService.GetOrRefreshSessionAsync(account, cancellationToken);
         if (account.Type == AccountType.Microsoft && session?.MinecraftAccessToken is null)
         {
+            logger.LogError($"Microsoft 账号 {account.Id} 会话不可用");
             throw new InvalidOperationException("Microsoft 账号会话不可用，请重新登录。");
         }
 
@@ -40,6 +43,7 @@ public sealed class LaunchService(
             : settings.JavaPathOverride!;
         if (!File.Exists(java))
         {
+            logger.LogError($"Java 可执行文件不存在: {java}");
             throw new FileNotFoundException("Java executable not found.", java);
         }
 
@@ -77,6 +81,7 @@ public sealed class LaunchService(
             gameArgs.Add(configuration.Game.Server.Port.ToString());
         }
 
+        logger.LogInformation($"已为账号 {account.Id} 构建启动配置（内存 {settings.MinMemoryMb}-{settings.MaxMemoryMb}MB，自动连服 {settings.AutoJoinServer}）");
         return new LaunchProfile(
             java,
             jvmArgs,
@@ -90,6 +95,7 @@ public sealed class LaunchService(
 
     public async Task LaunchAsync(AccountProfile account, CancellationToken cancellationToken)
     {
+        logger.LogInformation($"启动 Minecraft，账号 {account.Id}");
         var settings = await settingsStore.LoadAsync(cancellationToken);
         var profile = await BuildLaunchProfileAsync(account, cancellationToken);
         logService.Append("正在启动 Minecraft...");
@@ -118,6 +124,7 @@ public sealed class LaunchService(
             return vanilla;
         }
 
+        logger.LogError($"未找到 version.json（MC {configuration.Game.MinecraftVersion} / NeoForge {configuration.Game.NeoForgeVersion}）");
         throw new FileNotFoundException("未找到 Minecraft version.json，请先安装游戏。", vanilla);
     }
 

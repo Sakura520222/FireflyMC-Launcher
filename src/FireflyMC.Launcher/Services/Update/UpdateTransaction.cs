@@ -1,20 +1,23 @@
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Storage;
 using FireflyMC.Launcher.Models;
 
 namespace FireflyMC.Launcher.Services.Update;
 
-public sealed class UpdateTransaction(ILauncherPaths paths) : IUpdateTransaction
+public sealed class UpdateTransaction(ILauncherPaths paths, IDiagnosticLogger logger) : IUpdateTransaction
 {
     public async Task RecoverAsync(CancellationToken cancellationToken)
     {
         var state = await JsonFile.ReadAsync(paths.TransactionFile, JsonContext.Default.TransactionState, cancellationToken);
         if (state is null)
         {
+            logger.LogInformation("未发现未完成事务，清理残留 .part 文件");
             DeletePartFiles(paths.StagingDirectory);
             return;
         }
 
+        logger.LogWarning($"发现未完成事务 {state.TransactionId:N}，阶段={state.Phase}，开始恢复");
         switch (state.Phase)
         {
             case UpdatePhase.Resolving:
@@ -36,6 +39,8 @@ public sealed class UpdateTransaction(ILauncherPaths paths) : IUpdateTransaction
                 DeleteFileIfExists(paths.TransactionFile);
                 break;
         }
+
+        logger.LogInformation("事务恢复完成");
     }
 
     public async Task ExecuteAsync(
@@ -51,6 +56,7 @@ public sealed class UpdateTransaction(ILauncherPaths paths) : IUpdateTransaction
         Directory.CreateDirectory(backupPath);
         state = state with { BackupPath = backupPath };
         await WriteStateAsync(state, cancellationToken);
+        logger.LogInformation($"开始提交事务 {transactionId:N}（{plan.Downloads.Count} 替换，{plan.Deletes.Count} 删除）");
 
         try
         {
@@ -98,9 +104,11 @@ public sealed class UpdateTransaction(ILauncherPaths paths) : IUpdateTransaction
             await WriteStateAsync(state, cancellationToken);
             await CleanupAsync(transactionId, backupPath, cancellationToken);
             progress?.Report(new StageProgress(OperationStage.Cleanup, 100, 100, "更新完成", 0, null, null, null, false));
+            logger.LogInformation($"事务 {transactionId:N} 提交完成");
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogError($"事务 {transactionId:N} 提交失败，执行回滚", ex);
             await RollbackAsync(state, CancellationToken.None);
             throw;
         }
@@ -108,6 +116,7 @@ public sealed class UpdateTransaction(ILauncherPaths paths) : IUpdateTransaction
 
     private async Task RollbackAsync(TransactionState state, CancellationToken cancellationToken)
     {
+        logger.LogWarning($"从事务备份回滚：{state.ReplacedFiles.Count} 替换，{state.DeletedFiles.Count} 删除");
         if (!string.IsNullOrWhiteSpace(state.BackupPath) && Directory.Exists(state.BackupPath))
         {
             foreach (var relativePath in state.ReplacedFiles.Concat(state.DeletedFiles).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -137,6 +146,7 @@ public sealed class UpdateTransaction(ILauncherPaths paths) : IUpdateTransaction
 
     private async Task CleanupAsync(Guid transactionId, string? backupPath, CancellationToken cancellationToken)
     {
+        logger.LogDebug($"清理事务 {transactionId:N} 的 staging 与历史备份");
         DeleteDirectoryIfExists(paths.StagingDirectory);
         var retainedRoot = Path.Combine(paths.UpdateDirectory, "retained");
         Directory.CreateDirectory(retainedRoot);

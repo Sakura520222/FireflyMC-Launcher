@@ -1,13 +1,15 @@
 using System.Net;
 using System.Text.Json;
 using FireflyMC.Launcher.Contracts.Authentication.Microsoft;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 
 namespace FireflyMC.Launcher.Infrastructure.Authentication.Microsoft;
 
-public sealed class XboxLiveClient(HttpClient httpClient) : IXboxLiveClient
+public sealed class XboxLiveClient(HttpClient httpClient, IDiagnosticLogger logger) : IXboxLiveClient
 {
     public async Task<XboxLiveTokenResponse> RequestUserTokenAsync(string microsoftAccessToken, CancellationToken cancellationToken)
     {
+        logger.LogDebug("请求 Xbox Live 用户令牌");
         var body = new
         {
             Properties = new
@@ -24,6 +26,7 @@ public sealed class XboxLiveClient(HttpClient httpClient) : IXboxLiveClient
 
     public async Task<XstsTokenResponse> RequestXstsTokenAsync(string xboxLiveToken, CancellationToken cancellationToken)
     {
+        logger.LogDebug("请求 XSTS 令牌");
         var body = new
         {
             Properties = new
@@ -40,6 +43,7 @@ public sealed class XboxLiveClient(HttpClient httpClient) : IXboxLiveClient
         }
         catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized)
         {
+            logger.LogError("XSTS 验证失败：账号可能未注册 Xbox、年龄受限或地区不支持", ex);
             throw new InvalidOperationException("Xbox Live/XSTS 验证失败：账号可能未注册 Xbox、年龄受限或地区不支持。", ex);
         }
     }

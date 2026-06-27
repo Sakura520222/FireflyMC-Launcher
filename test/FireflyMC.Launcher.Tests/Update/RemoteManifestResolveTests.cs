@@ -1,4 +1,5 @@
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Services.Update;
 using FluentAssertions;
 using WireMock.RequestBuilders;
@@ -54,7 +55,8 @@ public sealed class RemoteManifestResolveTests
             hashVerifier: null!,
             platformResolver: null!,
             updateTransaction: null!,
-            LauncherUserAgent.Create(configuration));
+            LauncherUserAgent.Create(configuration),
+            new NullDiagnosticLogger());
 
         var manifest = await service.ResolveRemoteManifestAsync(CancellationToken.None);
 

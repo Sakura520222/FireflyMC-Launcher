@@ -1,4 +1,5 @@
 using FireflyMC.Launcher.Configuration;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Download;
 using FireflyMC.Launcher.Infrastructure.Platforms;
 using FireflyMC.Launcher.Models.Remote;
@@ -39,7 +40,7 @@ public sealed class ModDownloadSourceTests
                 ]
                 """));
         var config = CreateConfiguration(server);
-        var client = new ModrinthClient(new HttpClient(), config, new MirrorRouter(config), LauncherUserAgent.Create(config));
+        var client = new ModrinthClient(new HttpClient(), config, new MirrorRouter(config), LauncherUserAgent.Create(config), new NullDiagnosticLogger());
 
         var result = await client.ResolveAsync(
             new RemoteModEntry("Example", "example.jar", 0, ModPlatform.Modrinth, "mod-project", "1.0.0"),
@@ -87,7 +88,7 @@ public sealed class ModDownloadSourceTests
                 }
                 """));
         var config = CreateConfiguration(server);
-        var client = new CurseForgeClient(new HttpClient(), config, new MirrorRouter(config), LauncherUserAgent.Create(config));
+        var client = new CurseForgeClient(new HttpClient(), config, new MirrorRouter(config), LauncherUserAgent.Create(config), new NullDiagnosticLogger());
 
         var result = await client.ResolveAsync(
             new RemoteModEntry("FTB Ultimine", "ftb-ultimine-neoforge-2101.1.15.jar", 0, ModPlatform.CurseForge, "386134", null),

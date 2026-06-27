@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using FireflyMC.Launcher.Infrastructure.Crypto;
+using FireflyMC.Launcher.Infrastructure.Diagnostics;
 using FireflyMC.Launcher.Models;
 using FireflyMC.Launcher.Services.Logging;
 
 namespace FireflyMC.Launcher.Infrastructure.Process;
 
-public sealed class GameProcess(IGameLogService logService)
+public sealed class GameProcess(IGameLogService logService, IDiagnosticLogger logger)
 {
     public event EventHandler<int>? Exited;
 
@@ -30,6 +31,7 @@ public sealed class GameProcess(IGameLogService logService)
             startInfo.ArgumentList.Add(argument);
         }
 
+        logger.LogInformation("启动 Minecraft 游戏进程");
         logService.Append(SecretRedactor.Redact($"启动命令: {profile.JavaExecutable} {string.Join(' ', startInfo.ArgumentList)}", redactIpAddresses));
         var process = new System.Diagnostics.Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) =>
@@ -46,7 +48,11 @@ public sealed class GameProcess(IGameLogService logService)
                 logService.Append(SecretRedactor.Redact(e.Data, redactIpAddresses));
             }
         };
-        process.Exited += (_, _) => Exited?.Invoke(this, process.ExitCode);
+        process.Exited += (_, _) =>
+        {
+            logger.LogInformation($"游戏进程退出，退出码 {process.ExitCode}");
+            Exited?.Invoke(this, process.ExitCode);
+        };
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
